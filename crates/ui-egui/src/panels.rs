@@ -186,7 +186,11 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                     {
                                         ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(0.35 - seconds));
                                     }
-                                    let long_press = held_for.is_some_and(|seconds| seconds >= 0.35);
+                                    // A press dragged off the button opens the flyout at once, as in
+                                    // Photoshop, so press, drag and release is one gesture (#2301).
+                                    let dragged_off = held_for.is_some()
+                                        && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| !resp.rect.contains(p));
+                                    let long_press = held_for.is_some_and(|seconds| seconds >= 0.35) || (slot.len() > 1 && dragged_off);
                                     // Clicking the button of its open flyout again, with either button, closes
                                     // it (#4932); the release that ends the long press that opened it doesn't.
                                     let open_here = ui.data(|d| d.get_temp::<(egui::Id, Rect)>(flyout_id)).is_some_and(|(k, _)| k == key);
@@ -5186,13 +5190,22 @@ mod type_flyout_tests {
         frame(&mut app, &ctx, 1.75, vec![]);
         assert_eq!(app.ui.tool, Tool::VerticalType);
         assert!(!flyout(&ctx), "the pick closes the flyout");
+        // #2301: dragged off the button before the hold time, the flyout opens at once.
+        frame(&mut app, &ctx, 2.0, vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+        frame(&mut app, &ctx, 2.05, vec![egui::Event::PointerMoved(egui::pos2(menu.left() + 20.0, at.y))]);
+        frame(&mut app, &ctx, 2.1, vec![]);
+        assert!(flyout(&ctx), "a drag off the button opens the flyout");
+        frame(&mut app, &ctx, 2.15, vec![egui::Event::PointerMoved(egui::pos2(menu.left() + 65.0, menu.top() + 13.0))]);
+        frame(&mut app, &ctx, 2.2, vec![pointer(egui::pos2(menu.left() + 65.0, menu.top() + 13.0), false)]);
+        frame(&mut app, &ctx, 2.25, vec![]);
+        assert!(!flyout(&ctx), "releasing on a row picks it");
         // Released back on the button instead, the flyout stays open for a click (#4453).
         frame(&mut app, &ctx, 3.0, vec![egui::Event::PointerMoved(at), pointer(at, true)]);
         frame(&mut app, &ctx, 3.36, vec![]);
         frame(&mut app, &ctx, 3.4, vec![pointer(at, false)]);
         frame(&mut app, &ctx, 3.45, vec![]);
         assert!(flyout(&ctx));
-        assert_eq!(app.ui.tool, Tool::VerticalType, "the held button shows Vertical Type now");
+        assert_eq!(app.ui.tool, Tool::Type, "the held button shows the tool picked last");
     }
 
     /// #4444: click and hold on Change Screen Mode opens its list like the tool flyouts, without
