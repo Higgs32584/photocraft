@@ -230,9 +230,15 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                                         })
                                                         .fold(0.0f32, f32::max);
                                                     let fw = (label_w + 42.0 + 40.0).max(180.0);
+                                                    // Press and hold, drag onto a tool and release picks it in one
+                                                    // gesture, as in Photoshop (#6325).
+                                                    let held = ui.data(|d| d.get_temp::<egui::Id>(held_id)) == Some(key);
+                                                    let (down, released, at) =
+                                                        ui.input(|i| (i.pointer.primary_down(), i.pointer.primary_released(), i.pointer.latest_pos()));
                                                     for &item in slot.iter() {
                                                         let (r, ir) = ui.allocate_exact_size(vec2(fw, 26.0), Sense::click());
-                                                        if ir.hovered() {
+                                                        let under = held && at.is_some_and(|p| r.contains(p));
+                                                        if ir.hovered() || (under && down) {
                                                             ui.painter().rect_filled(r, 3.0, t.hover);
                                                         }
                                                         if item == tool {
@@ -265,7 +271,7 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                                                                 t.text_dim,
                                                             );
                                                         }
-                                                        if ir.clicked() {
+                                                        if ir.clicked() || (under && released) {
                                                             crate::tool_memory::select(app, item);
                                                             ui.data_mut(|d| d.remove::<(egui::Id, Rect)>(flyout_id));
                                                         }
@@ -5140,6 +5146,53 @@ mod type_flyout_tests {
         frame(&mut app, &ctx, 2.05, vec![pointer(row, false)]);
         assert_eq!(app.ui.tool, Tool::VerticalType);
         assert!(ctx.data(|d| d.get_temp::<(egui::Id, Rect)>(egui::Id::new("tool-flyout"))).is_none());
+    }
+
+    #[test]
+    fn hold_drag_and_release_on_a_flyout_row_picks_that_tool() {
+        // #6325: as in Photoshop, press and hold a tool button, drag onto a tool in the flyout
+        // that opens and release: that tool is selected and the flyout closes, in one gesture.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let index = TOOL_SECTIONS.iter().flat_map(|section| section.iter()).position(|slot| slot.contains(&Tool::Type)).unwrap();
+        let bx = if Tokens::get(&ctx).pro { 30.0 } else { 36.0 };
+        let mut buttons: Vec<Rect> = ctx.viewport(|v| {
+            v.prev_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, w)| w.iter())
+                .filter(|w| w.rect.size() == egui::Vec2::splat(bx) && w.sense.senses_click())
+                .map(|w| w.rect)
+                .collect()
+        });
+        buttons.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        let at = buttons[index].center();
+        let pointer = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let flyout = |ctx: &egui::Context| ctx.data(|d| d.get_temp::<(egui::Id, Rect)>(egui::Id::new("tool-flyout"))).is_some();
+        frame(&mut app, &ctx, 1.0, vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+        frame(&mut app, &ctx, 1.36, vec![]);
+        assert!(flyout(&ctx), "holding the button opens the flyout");
+        let key = egui::Id::new(("tool-slot", index));
+        let menu = ctx.memory(|m| m.area_rect(key.with("flyout"))).unwrap();
+        // Still holding: drag over the second row (Vertical Type) and let go there.
+        let row = egui::pos2(menu.left() + 65.0, menu.top() + 39.0 + 8.0);
+        frame(&mut app, &ctx, 1.5, vec![egui::Event::PointerMoved(egui::pos2(menu.left() + 20.0, at.y))]);
+        frame(&mut app, &ctx, 1.6, vec![egui::Event::PointerMoved(row)]);
+        assert!(flyout(&ctx), "dragging onto the flyout keeps it open");
+        frame(&mut app, &ctx, 1.7, vec![pointer(row, false)]);
+        frame(&mut app, &ctx, 1.75, vec![]);
+        assert_eq!(app.ui.tool, Tool::VerticalType);
+        assert!(!flyout(&ctx), "the pick closes the flyout");
+        // Released back on the button instead, the flyout stays open for a click (#4453).
+        frame(&mut app, &ctx, 3.0, vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+        frame(&mut app, &ctx, 3.36, vec![]);
+        frame(&mut app, &ctx, 3.4, vec![pointer(at, false)]);
+        frame(&mut app, &ctx, 3.45, vec![]);
+        assert!(flyout(&ctx));
+        assert_eq!(app.ui.tool, Tool::VerticalType, "the held button shows Vertical Type now");
     }
 
     /// #4444: click and hold on Change Screen Mode opens its list like the tool flyouts, without
