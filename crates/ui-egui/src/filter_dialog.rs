@@ -595,7 +595,9 @@ fn installed_filter(cmd: &str, key: &str) -> Option<fn(&InstalledProfile) -> boo
     use photocraft_cms::{ColorSpace, ProfileClass};
     match (cmd, key) {
         (c, "profile") if PROFILE_DIALOGS.contains(&c) => Some(|_| true),
-        ("edit.colorSettings", "workingRgb") => Some(|i| i.color_space == ColorSpace::Rgb && matches!(i.class, ProfileClass::Display | ProfileClass::ColorSpace)),
+        ("edit.colorSettings", "workingRgb") => {
+            Some(|i| i.color_space == ColorSpace::Rgb && matches!(i.class, ProfileClass::Display | ProfileClass::ColorSpace))
+        }
         ("edit.colorSettings", "workingCmyk") => Some(|i| i.color_space == ColorSpace::Cmyk),
         ("edit.colorSettings", "workingGray") => Some(|i| i.color_space == ColorSpace::Gray),
         _ => None,
