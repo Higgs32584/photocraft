@@ -459,6 +459,11 @@ pub fn handles(id: &str) -> bool {
 }
 
 pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
+    is_enabled_with_engine(app, id, || app.session.is_enabled(id))
+}
+
+/// Keep picker enablement testable with the engine's native filesystem check disabled.
+fn is_enabled_with_engine(app: &PhotocraftApp, id: &str, engine_enabled: impl FnOnce() -> bool) -> Option<bool> {
     if !handles(id) && !wraps(id) {
         return None;
     }
@@ -476,11 +481,10 @@ pub fn is_enabled(app: &PhotocraftApp, id: &str) -> Option<bool> {
                     || (doc && matches!(&i["window.arrange.".len()..], "floatAllInWindows" | "cascade" | "tile" | "tileAllVertically" | "tileAllHorizontally"))
             }
         },
-        // The menu path reads the picked file's bytes (`pick_file_bytes`), which the browser's
-        // picker hands over too, so Place Embedded works on the web, where the engine command's
-        // `path` can't be read (#5749). Place Linked needs a real file to link to.
-        "file.placeEmbedded" => doc,
-        i if wraps(i) => app.session.is_enabled(i),
+        // Embedded placement reads the picker's bytes on every platform. Linked placement keeps
+        // the engine's native filesystem guard because its source must remain reachable.
+        "file.placeEmbedded" => doc && app.services.file_dialog.is_some(),
+        i if wraps(i) => engine_enabled(),
         _ => true,
     })
 }
