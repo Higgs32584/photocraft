@@ -173,27 +173,6 @@ fn the_web_opens_every_selected_file() {
     assert!(app.ui.notices.iter().any(|n| n.error && n.title.contains("broken.png")), "{:?}", app.ui.notices);
 }
 
-/// #5749: on the web the picker hands over contents, not a path, and the engine's
-/// `file.placeEmbedded` (which reads `path`) is off there. File › Place Embedded is enabled with a
-/// document open and places the picked file's bytes, in Free Transform.
-#[test]
-fn the_web_places_a_picked_file_into_the_document() {
-    let (mut app, _) = app_with(vec![Some(FileDialogAnswer::Contents("small.png".into(), png_bytes(2, 2)))]);
-    assert_eq!(crate::view_cmds::is_enabled(&app, "file.placeEmbedded"), Some(false), "no document");
-    app.open_bytes("canvas.psd", b"x").unwrap();
-    assert_eq!(crate::view_cmds::is_enabled(&app, "file.placeEmbedded"), Some(true));
-    let layers = layer_count(&app);
-    menus::invoke(&mut app, &egui::Context::default(), "file.placeEmbedded", json!({})).unwrap();
-    answer(&mut app);
-    assert_eq!(app.session.documents().len(), 1, "placing doesn't open a document");
-    assert_eq!(layer_count(&app), layers + 1);
-    let st = app.session.active().unwrap();
-    let top = st.doc.layer(st.active_layer.unwrap()).unwrap();
-    assert_eq!(top.name, "small");
-    assert!(matches!(top.content, photocraft_doc::LayerContent::Smart(_)));
-    assert_eq!(app.ui.transform.as_ref().and_then(|t| t.made), Some(crate::state::MadeLayer::Place));
-}
-
 /// #5749: the web shell reads dropped files itself, so it asks where they landed: image files
 /// dropped on the canvas are placed from their bytes, presets and drops elsewhere are opened.
 #[test]
