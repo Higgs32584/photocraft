@@ -1098,7 +1098,11 @@ pub(crate) fn process_tree(inputs: &[BatchInput], output: &str, format: &str, sa
 /// every file). Those are saved as PSD, the format Photoshop's Save As offers for a raw.
 fn same_format(path: &str) -> String {
     const IMPORT_ONLY: &[&str] = &["pdn", "kra", "krz", "af", "afdesign", "afphoto", "afpub"];
-    let ext = path.rsplit('.').next().unwrap_or("png").to_ascii_lowercase();
+    let name = file_name(path);
+    let ext = match name.rfind('.') {
+        Some(i) if i > 0 => name[i + 1..].to_ascii_lowercase(),
+        _ => "png".to_string(),
+    };
     if photocraft_io::raw::EXTENSIONS.contains(&ext.as_str()) || IMPORT_ONLY.contains(&ext.as_str()) { "psd".into() } else { ext }
 }
 
