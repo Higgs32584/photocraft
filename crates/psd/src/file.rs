@@ -368,7 +368,8 @@ impl PsdFile {
         let marked = self.global_blocks.iter().any(|b| matches!(&b.key, b"Mtrn" | b"Mt16" | b"Mt32"));
         match &self.layer_info {
             Some(li) => {
-                let in_block = matches!(self.layer_info_placement, LayerInfoPlacement::GlobalBlock { .. });
+                // At 16/32 bits the parser only places the layers in the depth's own `Lr16`/`Lr32` block.
+                let in_block = matches!(self.header.depth, 16 | 32) && matches!(self.layer_info_placement, LayerInfoPlacement::GlobalBlock { .. });
                 li.merged_alpha || marked || (in_block && self.names_merged_transparency(self.header.channels - color))
             }
             None => true,
@@ -581,6 +582,21 @@ mod write_tests {
                 assert_eq!(parsed.layers()[0].name(), file.layers()[0].name());
                 assert!(matches!(parsed.layer_info_placement, LayerInfoPlacement::GlobalBlock { key: k, .. } if k == key));
             }
+        }
+    }
+
+    #[test]
+    fn transparency_name_marks_the_merged_alpha_only_at_16_and_32_bits() {
+        let name: Vec<u8> = [0u8, 0, 0, 13].into_iter().chain("Transparency\0".encode_utf16().flat_map(u16::to_be_bytes)).collect();
+        for (depth, key, expected) in [(8, *b"Layr", false), (8, *b"Lr16", false), (16, *b"Lr16", true), (32, *b"Lr32", true)] {
+            let mut file = testgen::layered(Version::Psb, ColorMode::Rgb, depth, Compression::Raw);
+            file.header.channels = 4;
+            file.layer_info.as_mut().unwrap().merged_alpha = false;
+            file.global_blocks.retain(|b| !matches!(&b.key, b"Mtrn" | b"Mt16" | b"Mt32"));
+            file.layer_info_placement = LayerInfoPlacement::GlobalBlock { index: 0, signature: *b"8BIM", key, padding: None };
+            file.resources.retain(|r| !matches!(r.id, 1006 | 1045));
+            file.resources.push(ImageResource::new(1045, name.clone()));
+            assert_eq!(file.merged_has_alpha(), expected, "depth {depth}, key {}", String::from_utf8_lossy(&key));
         }
     }
 }
