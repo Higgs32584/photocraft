@@ -197,7 +197,7 @@ pub(crate) fn decode(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError>
         let d = jpeg_ext::decode(bytes, limits, meta.adobe_transform)?;
         let mut img = Image::from_raw(d.width, d.height, d.layout, d.sample, d.data)?;
         img.icc = meta.icc;
-        img.meta = Metadata { exif: meta.exif, xmp: meta.xmp, dpi: meta.dpi, ..Default::default() };
+        img.meta = Metadata { exif: meta.exif, xmp: meta.xmp, dpi: meta.dpi, photoshop_resources: meta.photoshop, ..Default::default() };
         if end == DataEnd::Truncated || d.damaged {
             img.warnings.push(DecodeWarning::Truncated { format: F });
         }
