@@ -335,7 +335,8 @@ impl ExportSettings {
 /// document came from, as Photoshop's Save does (#5733): only while that file keeps everything,
 /// i.e. the document is one plain raster layer ([`plain_raster`]) with no extra channels, in RGB
 /// or Grayscale at a depth (and, for Grayscale, a gray layout) the format stores, and either the
-/// format keeps transparency or the layer is the Background. The file itself must have held only
+/// format keeps transparency or the layer is opaque (the Background, or a layer made from it with
+/// no pixels deleted, as checked in Photoshop, #2223). The file itself must have held only
 /// this one image (not an animation, a multi-page TIFF or a multi-size icon), and its encoder
 /// must not quantise (GIF's palette and on/off transparency); a JPEG is rewritten at its own
 /// quality (#4032). Anything else still goes through Save As, so the original is never
@@ -356,9 +357,10 @@ pub(crate) fn saves_flat_in_place(doc: &Document, path: &str) -> bool {
             photocraft_color::SampleType::U16 => photocraft_codecs::SampleType::U16,
             photocraft_color::SampleType::F32 => photocraft_codecs::SampleType::F32,
         })
-        && (caps.alpha || doc.is_background(layer.id))
         && doc.channels.is_empty()
         && matches!(doc.mode, photocraft_doc::ColorMode::Rgb | photocraft_doc::ColorMode::Grayscale)
+        // Last: it may read every tile.
+        && (caps.alpha || doc.is_background(layer.id) || opaque_layer(doc, layer))
 }
 
 /// Whether `layer` is fully opaque over the canvas, so a format without transparency (JPEG)

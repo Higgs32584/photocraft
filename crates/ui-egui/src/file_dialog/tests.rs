@@ -121,6 +121,12 @@ fn a_jpeg_with_transparency_is_offered_as_png() {
     assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/photo.jpg"), "opaque: still a JPEG");
     answer(&open, None);
     app.poll_file_dialog(&ctx, None);
+    // Not the Background any more but still opaque: the JPEG keeps it, so Save writes back.
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(open.borrow().is_empty(), "no Save dialog");
+    assert_eq!(*written.borrow(), ["/pics/photo.jpg"]);
+    written.borrow_mut().clear();
     // Delete some pixels: the lone layer is now partly transparent.
     app.run("select.rect", json!({"x": 0, "y": 0, "width": 2, "height": 2})).unwrap();
     app.run("edit.clear", json!({})).unwrap();
@@ -1185,8 +1191,12 @@ fn save_of_a_flat_file_asks_after_the_dialog_when_another_app_changed_it() {
     let disk = on_disk(&mut app);
     changed_by_another_app(&disk, path);
     app.opened_from(path);
-    // Not the Background any more, and JPEG has no alpha: Save goes through the dialog.
+    // Transparency JPEG can't keep: Save goes through the dialog (which suggests a PNG; the
+    // user picks the JPEG anyway).
     app.run("layer.new.layerFromBackground", json!({})).unwrap();
+    app.run("select.rect", json!({"x": 0, "y": 0, "width": 2, "height": 2})).unwrap();
+    app.run("edit.clear", json!({})).unwrap();
+    app.run("select.deselect", json!({})).unwrap();
     app.run("image.adjustments.invert", json!({})).unwrap();
     changed_by_another_app(&disk, path);
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
