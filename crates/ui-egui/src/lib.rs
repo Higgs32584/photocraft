@@ -361,6 +361,12 @@ pub(crate) fn saves_flat_in_place(doc: &Document, path: &str) -> bool {
         && matches!(doc.mode, photocraft_doc::ColorMode::Rgb | photocraft_doc::ColorMode::Grayscale)
 }
 
+/// Whether `layer` is fully opaque over the canvas, so a format without transparency (JPEG)
+/// keeps all of it. Read from its tiles, stopping at the first transparent pixel (#2223).
+pub(crate) fn opaque_layer(doc: &Document, layer: &photocraft_doc::Layer) -> bool {
+    layer.surface().is_some_and(|s| !s.format().alpha || photocraft_io::opaque_surface(s, doc.bounds()))
+}
+
 /// The document's lone layer when it is a plain raster a flat file keeps: visible, at full
 /// opacity, in Normal mode, with no masks, effects or blending restrictions (#2234).
 pub(crate) fn plain_raster(doc: &Document) -> Option<&photocraft_doc::Layer> {
@@ -1506,12 +1512,17 @@ impl PhotocraftApp {
         let ext = st.path.as_deref().and_then(|p| std::path::Path::new(p).extension()).map(|e| e.to_string_lossy().to_ascii_lowercase());
         // An OpenRaster file only when it holds the whole document (#3806): else PSD is offered.
         let holds_ora = st.path.as_deref().is_some_and(|p| photocraft_engine::file_cmds::holds_at(&st.doc, p));
+        // A JPEG whose lone layer has transparency it can't keep is offered as a PNG, as
+        // Photoshop's Save does once pixels are deleted (#2223).
+        let transparent_jpeg = ext.as_deref().and_then(photocraft_codecs::from_extension) == Some(photocraft_codecs::Format::Jpeg)
+            && plain_raster(&st.doc).is_some_and(|l| !opaque_layer(&st.doc, l));
         let writable = ext.is_some_and(|e| {
             matches!(e.as_str(), photocraft_format::EXTENSION | "psd" | "psb" | "tif" | "tiff")
                 || (e == "ora" && holds_ora)
                 || (flat && photocraft_codecs::from_extension(&e).is_some_and(|f| f.caps().write))
         });
         let suggested = match &st.path {
+            Some(p) if transparent_jpeg => std::path::Path::new(p).with_extension("png").to_string_lossy().into_owned(),
             Some(p) if writable => p.clone(),
             p => {
                 let source = p.as_deref().unwrap_or(&st.doc.name);

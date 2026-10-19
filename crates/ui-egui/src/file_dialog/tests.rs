@@ -108,6 +108,52 @@ fn save_dialog_preserves_flat_and_existing_layered_format_defaults() {
     }
 }
 
+/// Checked in Photoshop: once some pixels of a JPEG are deleted (transparency a JPEG can't keep),
+/// Save asks where to save, defaulting to PNG; while the layer is still opaque the JPEG stays the
+/// default (#2223).
+#[test]
+fn a_jpeg_with_transparency_is_offered_as_png() {
+    let ctx = egui::Context::default();
+    let (mut app, open, written) = jpeg_app(Some("/pics/photo.jpg"), false);
+    app.run("layer.new.layerFromBackground", json!({})).unwrap();
+    menus::invoke(&mut app, &ctx, "file.saveAs", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/photo.jpg"), "opaque: still a JPEG");
+    answer(&open, None);
+    app.poll_file_dialog(&ctx, None);
+    // Delete some pixels: the lone layer is now partly transparent.
+    app.run("select.rect", json!({"x": 0, "y": 0, "width": 2, "height": 2})).unwrap();
+    app.run("edit.clear", json!({})).unwrap();
+    app.run("select.deselect", json!({})).unwrap();
+    for command in ["file.save", "file.saveAs"] {
+        menus::invoke(&mut app, &ctx, command, json!({})).unwrap();
+        app.poll_file_dialog(&ctx, None);
+        assert!(
+            matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/photo.png"),
+            "{command}: {:?}",
+            open.borrow().first().map(|(r, _)| r.clone())
+        );
+        answer(&open, None);
+        app.poll_file_dialog(&ctx, None);
+    }
+    assert!(written.borrow().is_empty());
+    // Saved as the PNG it suggests, the document lives there and keeps its transparency.
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    answer(&open, Some(FileDialogAnswer::SaveTo("/pics/photo.png".into())));
+    app.poll_file_dialog(&ctx, None);
+    assert_eq!(*written.borrow(), ["/pics/photo.png"]);
+    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/photo.png"));
+}
+
+/// A Grayscale layer without an alpha channel is opaque, never read past its colour samples.
+#[test]
+fn a_layer_without_alpha_is_opaque() {
+    let doc = photocraft_doc::Document::new("gray", photocraft_geom::Size::new(3, 3), photocraft_doc::ColorMode::Grayscale, photocraft_color::SampleType::U8);
+    let layer = photocraft_doc::Layer::raster("gray", photocraft_color::PixelFormat::GRAY8);
+    assert!(crate::opaque_layer(&doc, &layer));
+}
+
 #[test]
 fn transparent_png_keeps_its_format_until_its_lone_layer_becomes_smart() {
     let (mut app, open, written) = app();

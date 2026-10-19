@@ -510,8 +510,9 @@ fn drop_alpha(data: &mut Vec<u8>, color: usize, alpha: usize) {
     data.shrink_to_fit();
 }
 
-/// Whether every pixel of `s` over `r` is fully opaque (read from the tiles, no copy).
-pub(crate) fn opaque_surface(s: &Surface, r: Rect) -> bool {
+/// Whether every pixel of `s` over `r` is fully opaque (read from the tiles, no copy). `s` must
+/// have an alpha channel.
+pub fn opaque_surface(s: &Surface, r: Rect) -> bool {
     let fmt = s.format();
     let (ch, bps) = (fmt.channels(), fmt.sample.bytes());
     let a = ch - 1;
