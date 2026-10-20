@@ -1238,6 +1238,27 @@ fn save_asks_before_replacing_a_file_another_app_changed() {
     assert!(disk_prompt(&app).is_none());
 }
 
+/// A document that no longer fits its flat file by the time the changed-on-disk prompt is
+/// answered goes through Save As rather than being written over the original.
+#[test]
+fn replace_after_the_document_outgrew_its_flat_file_asks_where_to_save() {
+    let ctx = egui::Context::default();
+    let path = "/pics/My image.jpg";
+    let (mut app, open, written) = jpeg_app(None, false);
+    let disk = on_disk(&mut app);
+    changed_by_another_app(&disk, path);
+    app.opened_from(path);
+    app.run("image.adjustments.invert", json!({})).unwrap();
+    changed_by_another_app(&disk, path);
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    let id = disk_prompt(&app).expect("Save asks first").id;
+    app.run("layer.new.layer", json!({})).unwrap();
+    crate::dialogs::confirm(&mut app, id).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { .. }, _)]), "Save As");
+    assert!(written.borrow().is_empty(), "the JPEG is not written over");
+}
+
 #[test]
 fn save_in_place_of_a_flat_file_asks_first_when_another_app_changed_it() {
     let ctx = egui::Context::default();

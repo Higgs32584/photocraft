@@ -56,8 +56,12 @@ pub fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<V
         } else if app.session.active().is_some_and(|st| crate::saves_flat_in_place(&st.doc, &path)) {
             // Its own flat file: a JPEG asks JPEG Options next (#2223).
             app.save_flat_in_place(path, choices)
-        } else {
+        } else if app.session.active().is_some_and(|st| photocraft_engine::file_cmds::holds_at(&st.doc, &path)) {
             app.save_in_place(path)
+        } else {
+            // The document changed while the prompt was open and its file can't keep it any more:
+            // Save As, never a write over the original with less (#5733).
+            app.save_dialog_flow(None, choices, true)
         }
     })
 }
