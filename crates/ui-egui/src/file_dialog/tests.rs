@@ -121,10 +121,12 @@ fn a_jpeg_with_transparency_is_offered_as_png() {
     assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/photo.jpg"), "opaque: still a JPEG");
     answer(&open, None);
     app.poll_file_dialog(&ctx, None);
-    // Not the Background any more but still opaque: the JPEG keeps it, so Save writes back.
+    // Not the Background any more but still opaque: the JPEG keeps it, so Save writes back
+    // after JPEG Options.
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
     app.poll_file_dialog(&ctx, None);
     assert!(open.borrow().is_empty(), "no Save dialog");
+    crate::jpeg_options_ui::confirm(&mut app, &ctx);
     assert_eq!(*written.borrow(), ["/pics/photo.jpg"]);
     written.borrow_mut().clear();
     // Delete some pixels: the lone layer is now partly transparent.
@@ -220,12 +222,17 @@ fn layered_save_respects_explicit_jpeg_choices() {
     }
 }
 
-/// File › Save on a flat JPEG asks for its name; confirming its own file asks JPEG Options and,
-/// once answered, records a plain Save that writes the file an action is played on (#3531).
+/// File › Save on a flat JPEG it can't write back in place (here: transparency) asks for its
+/// name; confirming its own file asks JPEG Options and, once answered, records a plain Save that
+/// writes the file an action is played on (#3531).
 #[test]
 fn plain_save_of_a_flat_jpeg_asks_jpeg_options_and_records_a_plain_save() {
     let ctx = egui::Context::default();
     let (mut app, open, written) = jpeg_app(Some("/pics/photo.jpg"), false);
+    app.run("layer.new.layerFromBackground", json!({})).unwrap();
+    app.run("select.rect", json!({"x": 0, "y": 0, "width": 2, "height": 2})).unwrap();
+    app.run("edit.clear", json!({})).unwrap();
+    app.run("select.deselect", json!({})).unwrap();
     app.run("actions.record", json!({})).unwrap();
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
     app.poll_file_dialog(&ctx, None);
@@ -1209,9 +1216,127 @@ fn save_in_place_of_a_flat_file_asks_first_when_another_app_changed_it() {
     assert!(written.borrow().is_empty(), "the changed file is not replaced before the answer");
     let id = disk_prompt(&app).expect("Save asks first").id;
     crate::dialogs::confirm(&mut app, id).unwrap();
+    // Then JPEG Options (#2223): Cancel there writes nothing either.
+    assert!(written.borrow().is_empty());
+    assert_eq!(app.jpeg_options.as_ref().map(|p| (p.record, p.copy)), Some(("file.save", false)));
+    app.jpeg_options = None;
+    assert!(written.borrow().is_empty());
+    assert!(app.session.active().unwrap().is_dirty());
+    // Saving again asks both again; OK in both writes it.
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    let id = disk_prompt(&app).expect("Save asks first").id;
+    assert!(app.jpeg_options.is_none(), "the changed-on-disk prompt comes first");
+    crate::dialogs::confirm(&mut app, id).unwrap();
+    crate::jpeg_options_ui::confirm(&mut app, &ctx);
     assert_eq!(*written.borrow(), [path]);
     assert!(!app.session.active().unwrap().is_dirty());
-    assert_eq!(app.session.journal.last().map(|s| s.0.as_str()), Some("file.save"), "recorded as a plain Save");
+    assert_eq!(app.session.journal.last(), Some(&("file.save".to_string(), json!({}))), "recorded as a plain Save");
+}
+
+/// The JPEG quality of each save, as the exporter was given it.
+type Qualities = Rc<RefCell<Vec<Option<u8>>>>;
+
+/// [`jpeg_app`] opened from `path` and edited, whose exporter records the JPEG quality of each
+/// save (#2223).
+fn flat_jpeg_app(path: &str) -> (PhotocraftApp, Open, Rc<RefCell<Vec<String>>>, Qualities) {
+    let (mut app, open, written) = jpeg_app(Some(path), false);
+    let qualities = Qualities::default();
+    let q = qualities.clone();
+    app.services.export = Some(Box::new(move |_: &photocraft_doc::Document, _: &str, s: &crate::ExportSettings| {
+        q.borrow_mut().push(s.jpeg_quality);
+        Ok((b"out".to_vec(), Vec::new()))
+    }));
+    app.run("image.adjustments.invert", json!({})).unwrap();
+    (app, open, written, qualities)
+}
+
+/// File › Save on a flat JPEG that still holds the document asks JPEG Options, then writes over
+/// it with no Save dialog, as Photoshop does; Cancel writes nothing (#2223).
+#[test]
+fn save_asks_jpeg_options_then_writes_a_flat_jpeg_over_itself() {
+    let ctx = egui::Context::default();
+    let (mut app, open, written, qualities) = flat_jpeg_app("/pics/photo.jpg");
+    let own = app.session.active().unwrap().doc.file_encoding.jpeg_quality.expect("an opened JPEG knows its quality");
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(open.borrow().is_empty(), "no Save dialog");
+    assert!(written.borrow().is_empty(), "nothing written before the options are answered");
+    let start = crate::jpeg_options_ui::Start::for_active(&app);
+    assert_eq!(app.jpeg_options.as_ref().map(|p| (p.path.as_str(), p.quality, p.copy, p.record)), Some(("/pics/photo.jpg", start.quality, false, "file.save")));
+    // Another save waits for the answer.
+    assert!(menus::invoke(&mut app, &ctx, "file.save", json!({})).is_err());
+    // Cancel (what the dialog does): nothing is written and the document stays unsaved.
+    app.jpeg_options = None;
+    assert!(written.borrow().is_empty());
+    assert!(app.session.active().unwrap().is_dirty());
+    // OK as it starts: the file's own quality, exactly, recorded as a plain Save.
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    crate::jpeg_options_ui::confirm(&mut app, &ctx);
+    assert_eq!(*written.borrow(), ["/pics/photo.jpg"]);
+    assert_eq!(*qualities.borrow(), [Some(own)]);
+    assert_eq!(app.session.journal.last(), Some(&("file.save".to_string(), json!({}))));
+    assert!(!app.session.active().unwrap().is_dirty());
+    // OK at another quality and format: written with them, and recorded with them.
+    app.run("image.adjustments.invert", json!({})).unwrap();
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    if let Some(p) = app.jpeg_options.as_mut() {
+        p.quality = 3;
+        p.format = photocraft_codecs::JpegFormat::Progressive;
+    }
+    crate::jpeg_options_ui::confirm(&mut app, &ctx);
+    assert_eq!(*written.borrow(), ["/pics/photo.jpg", "/pics/photo.jpg"]);
+    assert_eq!(qualities.borrow().last().copied().flatten(), Some(photocraft_engine::file_cmds::jpeg_quality(3.0)));
+    assert_eq!(app.session.journal.last(), Some(&("file.save".to_string(), json!({"quality": 3, "jpegFormat": "progressive"}))));
+    assert_eq!(app.session.active().unwrap().path.as_deref(), Some("/pics/photo.jpg"));
+    // A script's `quality` answers it: no prompt.
+    app.run("image.adjustments.invert", json!({})).unwrap();
+    menus::invoke(&mut app, &ctx, "file.save", json!({"quality": 12})).unwrap();
+    assert!(app.jpeg_options.is_none());
+    assert_eq!(written.borrow().len(), 3);
+    assert_eq!(qualities.borrow().last().copied().flatten(), Some(photocraft_engine::file_cmds::jpeg_quality(12.0)));
+    // Once a layer is added, Save asks where to save a PSD instead (#2234).
+    app.run("layer.new.layer", json!({})).unwrap();
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.poll_file_dialog(&ctx, None);
+    assert!(app.jpeg_options.is_none());
+    assert!(matches!(open.borrow().as_slice(), [(FileDialogRequest::Save { suggested }, _)] if suggested == "/pics/photo.psd"));
+    answer(&open, None);
+    app.poll_file_dialog(&ctx, None);
+}
+
+/// Adds another flat JPEG, opened from `path`, and makes it active.
+fn add_flat_jpeg(app: &mut PhotocraftApp, path: &str) {
+    let bytes = photocraft_io::export(&app.session.active().unwrap().doc, "other.jpg", &Default::default()).unwrap().bytes;
+    let doc = photocraft_io::import("other.jpg", &bytes).unwrap().document;
+    let index = app.session.add_document(doc, Some(path.to_string()));
+    app.session.set_active(index);
+}
+
+/// An action being recorded keeps File › Save over a flat JPEG as a `file.save` step with the
+/// JPEG Options answer, and playing it writes the active flat JPEG over itself with that answer
+/// and no prompt (#2223). A cancelled JPEG Options records nothing.
+#[test]
+fn flat_jpeg_saves_are_recorded_and_replay_over_the_open_file() {
+    let ctx = egui::Context::default();
+    let (mut app, open, written, qualities) = flat_jpeg_app("/pics/photo.jpg");
+    app.run("actions.record", json!({})).unwrap();
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    app.jpeg_options = None;
+    menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    if let Some(p) = app.jpeg_options.as_mut() {
+        p.quality = 5;
+    }
+    crate::jpeg_options_ui::confirm(&mut app, &ctx);
+    app.run("actions.stop", json!({})).unwrap();
+    assert_eq!(app.session.actions.list[0].steps, [("file.save".to_string(), json!({"quality": 5}))]);
+    add_flat_jpeg(&mut app, "/pics/other.jpg");
+    written.borrow_mut().clear();
+    let played = app.run("actions.play", json!({"action": 0})).unwrap();
+    assert!(played.get("failed").is_none(), "{played}");
+    assert!(app.jpeg_options.is_none(), "playback does not ask");
+    assert_eq!(*written.borrow(), ["/pics/other.jpg"]);
+    assert_eq!(qualities.borrow().last().copied().flatten(), Some(photocraft_engine::file_cmds::jpeg_quality(5.0)));
+    assert!(open.borrow().is_empty(), "no Save dialog");
 }
 
 #[test]
