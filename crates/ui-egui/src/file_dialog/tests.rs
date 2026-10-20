@@ -1431,10 +1431,10 @@ fn a_scripted_quality_survives_the_changed_on_disk_prompt() {
     app.opened_from(path);
     app.run("image.adjustments.invert", json!({})).unwrap();
     changed_by_another_app(&disk, path);
+    // Saved in place here (#2223): no Save dialog, only the changed-on-disk prompt.
     menus::invoke(&mut app, &ctx, "file.save", json!({"quality": 5})).unwrap();
     app.poll_file_dialog(&ctx, None);
-    answer(&open, Some(FileDialogAnswer::SaveTo(path.into())));
-    app.poll_file_dialog(&ctx, None);
+    assert!(open.borrow().is_empty(), "no Save dialog");
     assert!(written.borrow().is_empty(), "the changed file is not replaced before the answer");
     let id = disk_prompt(&app).expect("Save asks first").id;
     crate::dialogs::confirm(&mut app, id).unwrap();

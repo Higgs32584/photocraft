@@ -262,7 +262,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                             if app.save_options_open() {
                                 return Err(crate::SAVE_OPTIONS_OPEN.into());
                             }
-                            crate::disk_change_prompt::intercept(app, doc, &path, false).unwrap_or_else(|| app.save_flat_in_place(path, choices))
+                            crate::disk_change_prompt::intercept(app, doc, &path, false, choices).unwrap_or_else(|| app.save_flat_in_place(path, choices))
                         }
                         // Any other flat file asks for its name; confirming its own file records a
                         // plain Save that writes the file an action is played on (#3531).
