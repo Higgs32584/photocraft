@@ -231,7 +231,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "file.save" => {
             // Writes back only to a layered file that holds the whole document; anything else
             // goes through Save As, so the original is never overwritten with less (#3806).
-            let choices = crate::SaveChoices::from_params(&params, id)?;
+            let choices = crate::FormatChoices::from_params(&params, id)?;
             match params.get("path").and_then(Value::as_str) {
                 Some(path) => app.save_as_with(Some(path.to_string()), choices),
                 None => {
@@ -240,8 +240,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                         Some((true, path, d)) => {
                             // Another app changed the file since it was opened or saved: ask first (#6596).
                             let doc = d.doc.id;
-                            crate::disk_change_prompt::intercept(app, doc, &path, false, crate::SaveChoices::default())
-                                .unwrap_or_else(|| app.save_in_place(path))
+                            crate::disk_change_prompt::intercept(app, doc, &path, false, crate::FormatChoices::default())
+                                .unwrap_or_else(|| app.save_in_place(path, crate::FormatChoices::default()))
                         }
                         Some((false, path, d)) if photocraft_engine::file_cmds::saves_in_place(&path) => {
                             // Its own file is layered but can't hold what the document has now.
@@ -256,7 +256,8 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
                         // Its own flat file, while it still keeps the whole document (one plain
                         // layer it can store): written back, as Photoshop's Save does (#5733),
                         // asking first if another app changed it (#6596), then JPEG Options for a
-                        // JPEG (#2223). Cancel in either writes nothing.
+                        // JPEG (#2223), or Targa or DDS Options for those. Cancel in either writes
+                        // nothing.
                         Some((false, path, d)) if crate::saves_flat_in_place(&d.doc, &path) => {
                             let doc = d.doc.id;
                             if app.save_options_open() {
@@ -300,7 +301,7 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
             }
         }
         "file.saveAs" => {
-            let choices = crate::SaveChoices::from_params(&params, id)?;
+            let choices = crate::FormatChoices::from_params(&params, id)?;
             app.save_as_with(params.get("path").and_then(Value::as_str).map(str::to_string), choices)
         }
         "view.zoomIn" | "view.zoomOut" | "view.fitOnScreen" | "view.actualPixels" => app.run(id, params),
