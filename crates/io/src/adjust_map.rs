@@ -158,7 +158,7 @@ pub fn parse(key: &[u8; 4], data: &[u8], cged: Option<&[u8]>, channels: Channels
     }
     // In other modes a mixer using the fourth (black) source has no RGB meaning: keep it raw.
     // Mixers written by `write` from RGB outputs leave that source at 0.
-    if key == b"mixr" && channels == Channels::Other && (0..).map_while(|r| bei16(data, 4 + r * 10 + 6)).any(|k| k != 0) {
+    if key == b"mixr" && channels != Channels::Cmyk && (0..).map_while(|r| bei16(data, 4 + r * 10 + 6)).any(|k| k != 0) {
         return unsupported(key, data);
     }
     let mut a = parse_any(key, data, cged);
