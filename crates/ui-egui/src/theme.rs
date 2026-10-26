@@ -764,7 +764,7 @@ impl Tokens {
 
     /// Tokens for the active theme (stored in egui's context data by [`apply`]).
     pub fn get(ctx: &egui::Context) -> Tokens {
-        ctx.data(|d| d.get_temp::<Tokens>(egui::Id::new("photocraft-theme"))).unwrap_or_else(|| Tokens::for_kind(ThemeKind::Studio))
+        ctx.data(|d| d.get_temp::<Tokens>(egui::Id::unique("photocraft-theme"))).unwrap_or_else(|| Tokens::for_kind(ThemeKind::Studio))
     }
 
     /// Thin RGB outlines; the filled bands use the same hues with subdued coverage.
@@ -872,6 +872,12 @@ pub fn install_fonts_with(ctx: &egui::Context, cjk: crate::cjk_fonts::Sources) {
     if let Some(mono) = mono {
         fonts.families.entry(FontFamily::Monospace).or_default().insert(0, mono);
     }
+    // The optional craft-fonts input carries Japanese, Simplified Chinese, Korean, Arabic, Thai and
+    // other faces. They are not registered into this static stack: `cjk_fonts` installs a
+    // per-character font provider for them, so a broad Simplified Chinese face is not put in the
+    // family stack ahead of the Japanese or Korean face, and a locale without a Traditional Chinese
+    // craft face leaves Han to the system font. (A single linear per-family chain still decides a
+    // glyph once a broad face is discovered; see `cjk_fonts`.)
     // Named weights fall back to the default stack for missing glyphs.
     let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     for (fam, primary) in [("medium", medium), ("semibold", semibold)] {
@@ -908,11 +914,16 @@ fn ui_fonts_active(ctx: &egui::Context) -> bool {
 }
 
 fn ui_fonts_id() -> egui::Id {
-    egui::Id::new("photocraft-ui-fonts")
+    egui::Id::unique("photocraft-ui-fonts")
 }
 
 fn ui_font_size(ctx: &egui::Context) -> UiFontSize {
     ctx.data(|d| d.get_temp::<UiFontSize>(ui_fonts_id())).unwrap_or_default()
+}
+
+/// The Interface > UI Font Size multiplier for the current context (including the default Small).
+pub(crate) fn ui_font_scale(ctx: &egui::Context) -> f32 {
+    font_scale(ui_font_size(ctx))
 }
 
 fn font_scale(size: UiFontSize) -> f32 {
@@ -976,6 +987,10 @@ impl egui::Plugin for UiFontSizePlugin {
             Arc::make_mut(data).tweak.scale = original * font_scale(size);
         }
         ctx.set_fonts(fonts);
+        // The provider must use the scale of the definitions that were active while this pass
+        // laid out text. A face it discovers during the pass is inserted at that old scale; after
+        // `set_fonts` the rescaled definitions take effect and the provider follows them.
+        crate::cjk_fonts::set_craft_font_scale(ctx, font_scale(size));
         self.applied = size;
         ctx.request_repaint();
     }
@@ -997,7 +1012,7 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
     // including when an integration or restored egui state pinned its own theme preference.
     ctx.set_theme(egui::ThemePreference::System);
     let t = Tokens::for_kind(kind);
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("photocraft-theme"), t));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
     let mut v = if t.dark() { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.chrome;
     v.window_fill = t.card;
@@ -1494,7 +1509,7 @@ pub mod live {
                     super::apply(ctx, kind);
                     let mut t = Tokens::get(ctx);
                     let unknown = apply_overrides(&mut t, &v);
-                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("photocraft-theme"), t));
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
                     if !unknown.is_empty() {
                         log::warn!("unknown token keys: {unknown:?}");
                     }
