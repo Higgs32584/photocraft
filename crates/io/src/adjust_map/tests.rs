@@ -349,8 +349,7 @@ fn malformed_falls_back_to_unsupported() {
     assert!(
         matches!(parse(b"mixr", &mono, None, Channels::Cmyk), Adjustment::ChannelMixer { cmyk: Some(rows), monochrome: true, .. } if rows[0] == [0.3, 0.3, 0.3, 1.0, 0.0])
     );
-    let ours =
-        write(&Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], monochrome: false, cmyk: None });
+    let ours = write(&Adjustment::ChannelMixer { matrix: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], monochrome: false, cmyk: None });
     assert!(matches!(parse(b"mixr", &ours[0].1, None, Channels::Other), Adjustment::ChannelMixer { .. }));
     assert!(matches!(parse(b"mixr", &[0, 1, 0, 0, 0, 100], None, Channels::Rgb), Adjustment::Unsupported { .. }));
     // Photo Filter: unknown version, HSB colour space, out-of-range version-3 XYZ, truncated.

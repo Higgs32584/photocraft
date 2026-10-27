@@ -17,8 +17,8 @@ mod tone;
 #[cfg(test)]
 use channels::lab_denorm;
 pub use channels::{
-    LAB_NEUTRAL, LabOp, apply_cmy, cmy_adjustment, cmyk_channel_adjustment, cmyk_mixer, mix_inks, ink_brightness_contrast_lut, ink_luma, ink_through, lab_channel_adjustment,
-    lab_stored_op, stored_channel_adjustment, stored_channels, threshold_white,
+    LAB_NEUTRAL, LabOp, apply_cmy, cmy_adjustment, cmyk_channel_adjustment, cmyk_mixer, ink_brightness_contrast_lut, ink_luma, ink_through,
+    lab_channel_adjustment, lab_stored_op, mix_inks, stored_channel_adjustment, stored_channels, threshold_white,
 };
 use channels::{apply_lab, legacy_brightness_contrast, legacy_brightness_contrast_hdr};
 use color::gradient;
