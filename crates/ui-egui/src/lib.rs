@@ -224,7 +224,6 @@ pub use prefs::kys_import;
 pub use prefs::prefs_ui;
 use prefs::pressure_curve_ui;
 pub(crate) use services::SAVE_OPTIONS_OPEN;
-pub(crate) use services::{opaque_layer, saves_flat_in_place};
 #[cfg(test)]
 pub(crate) use services::saved_revision_after_write;
 pub use services::{
@@ -233,6 +232,7 @@ pub use services::{
     FileStampFn, FormatChoices, ImportFn, Inbox, LoadTextFn, OpenUrlFn, OsEventsFn, PhotoshopShortcutsFn, QuitFn, RecoverFn, Recoverable, RightButtonDownFn,
     SameFileFn, SaveFileFn, SaveTextFn, Services, SystemThemeFn, WindowFrameFn, WriteFn,
 };
+pub(crate) use services::{opaque_layer, saves_flat_in_place};
 pub use text::bidi_text;
 pub use text::cjk_fonts;
 pub use text::direction;
