@@ -27,6 +27,7 @@ mod ants;
 pub mod apply_color;
 pub mod artboard_tool;
 pub mod artboard_ui;
+pub(crate) mod automation_preview;
 pub(crate) mod background_redraw;
 pub mod bidi_text;
 pub(crate) mod bitmap_dialog;
@@ -886,6 +887,9 @@ pub struct PhotocraftApp {
     /// makes shortcut- and dialog-triggered commands pass the same policy as
     /// direct control calls.
     pub(crate) automation_input: bool,
+    /// Open dialogs a control request or synthetic input opened or edited: their live previews
+    /// pass the automation policy as confirming them would (`automation_preview`).
+    pub(crate) automation_dialogs: Vec<u64>,
     /// Action playbacks paused at a step dialog, by the token in that dialog's fields
     /// ([`actions::RESUME`]): what to play next and the automation gate it paused under.
     pub(crate) paused_playbacks: actions::PausedPlaybacks,
@@ -1154,6 +1158,7 @@ impl PhotocraftApp {
             synthetic_reinject: false,
             synthetic_snapshot: None,
             automation_input: false,
+            automation_dialogs: Vec::new(),
             paused_playbacks: Default::default(),
             channel_thumbs: None,
             channel_views: HashMap::new(),
@@ -2628,6 +2633,10 @@ impl PhotocraftApp {
         // Remember the 0.37 panel sizes so a later 0.36 rollback's newer old-key values win on
         // the next upgrade (see `panels::migrate_panel_state`).
         panels::remember_panel_state(&ctx);
+        // Synthetic input could have edited any dialog open now: preview it under the policy.
+        if self.automation_input {
+            automation_preview::note_open(self);
+        }
         self.automation_input = false;
         shape_stroke_ui::finish_frame(self, &ctx);
         native_menu::sync(self, &ctx);
