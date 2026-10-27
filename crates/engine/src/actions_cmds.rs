@@ -48,6 +48,28 @@ pub struct Action {
     /// Button Mode colour. Empty is none; otherwise one of [`BUTTON_COLORS`].
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub color: String,
+    /// Written by automation: loaded, recorded, or had its steps edited while
+    /// [`Session::authorize`] was installed (a control, MCP or synthetic-input request).
+    /// Playback keeps automation's gate ([`Session::automation_gate`]) for it even when the user
+    /// starts it (a key, the Actions panel, Batch), so a client confined to its automation roots
+    /// can't plant steps that later run with the user's file access.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automation: bool,
+}
+
+/// Mark action `idx` as written by automation when an automation gate is installed.
+pub(crate) fn note_automation_edit(s: &mut Session, idx: usize) {
+    if s.authorize.is_some()
+        && let Some(action) = s.actions.list.get_mut(idx)
+    {
+        action.automation = true;
+    }
+}
+
+/// The gate to install while `action` plays: automation's, for an action automation wrote that
+/// plays with none installed. `None` when the session's own gate (or none) applies.
+pub fn kept_gate(s: &Session, action: &Action) -> Option<fn(&str, &Value) -> Result<()>> {
+    if action.automation && s.authorize.is_none() { s.automation_gate } else { None }
 }
 
 /// Button Mode colours, in Photoshop's order. Empty is no colour.
@@ -55,7 +77,7 @@ pub const BUTTON_COLORS: [&str; 8] = ["", "red", "orange", "yellow", "green", "b
 
 impl Action {
     pub fn new(name: impl Into<String>, steps: Vec<(String, Value)>) -> Self {
-        Self { name: name.into(), steps, disabled: BTreeSet::new(), dialogs: BTreeSet::new(), set: None, color: String::new() }
+        Self { name: name.into(), steps, disabled: BTreeSet::new(), dialogs: BTreeSet::new(), set: None, color: String::new(), automation: false }
     }
 
     /// Apply `f` to every per-step index set (`disabled`, `dialogs`) after steps moved.
@@ -330,6 +352,7 @@ fn record(s: &mut Session, p: &Value) -> Result<Value> {
         s.actions.list.len() - 1
     };
     s.actions.recording = Some((s.journal.len(), idx));
+    note_automation_edit(s, idx);
     s.actions.take = s.actions.take.wrapping_add(1);
     let name = s.actions.list.get(idx).map(|a| a.name.clone()).unwrap_or_default();
     Ok(json!({"action": name, "index": idx}))
@@ -454,7 +477,15 @@ pub fn nested_failure(id: &str, value: &Value) -> Option<String> {
 fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let (action, from) = playback_plan(s, p)?;
     let recording = begin_playback(s, &action)?;
+    // Nested calls and commands the steps run on their own behalf see the kept gate too.
+    let kept = kept_gate(s, &action);
+    if kept.is_some() {
+        s.authorize = kept;
+    }
     let (ran, failed) = run_recorded(s, &action, from);
+    if kept.is_some() {
+        s.authorize = None;
+    }
     finish_playback(s, recording, &action, from);
     Ok(match failed {
         Some(f) => json!({"action": action.name, "ran": ran, "failed": f}),
@@ -491,6 +522,7 @@ fn move_item(s: &mut Session, p: &Value) -> Result<Value> {
         action.steps.insert(to, moved);
         action.remap_steps(|i| Some(moved_index(i, step, to)));
         let result = json!({"action": action.name, "step": to});
+        note_automation_edit(s, idx);
         s.actions.touch();
         Ok(result)
     } else {
@@ -547,6 +579,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             }
         });
         let result = json!({"action": action.name, "deletedStep": step, "steps": action.steps.len()});
+        note_automation_edit(s, idx);
         s.actions.touch();
         return Ok(result);
     }
@@ -600,6 +633,7 @@ fn toggle(s: &mut Session, p: &Value) -> Result<Value> {
         None => action.disabled = (0..action.steps.len()).collect(),
     }
     let result = json!({"action": action.name, "disabled": action.disabled});
+    note_automation_edit(s, idx);
     s.actions.touch();
     Ok(result)
 }
@@ -1510,6 +1544,48 @@ mod tests {
         assert_eq!(r["failed"]["id"], "file.open");
         assert!(r["failed"]["error"].as_str().unwrap().contains("disabled"), "{r}");
         assert!(s.documents().is_empty(), "the refused step does not open a document");
+    }
+
+    /// An action automation loads or edits keeps automation's gate when the user plays it (its
+    /// key, the panel), so a client confined to its roots can't plant file steps that later run
+    /// with the user's access. The user's own actions, and sets the user loads, run as before.
+    #[test]
+    fn actions_automation_wrote_keep_its_gate_when_the_user_plays_them() {
+        fn deny_file(id: &str, _: &Value) -> Result<()> {
+            if id.starts_with("file.") { Err(EngineError::Other(format!("automation command `{id}` is disabled"))) } else { Ok(()) }
+        }
+        let open = || ("file.openAs".to_string(), json!({"path": "/outside/secret.png"}));
+        let mut s = Session::new();
+        s.automation_gate = Some(deny_file);
+        s.actions.list.push(Action::new("Mine", vec![open()]));
+        s.actions.list.push(Action::new("Edited", vec![("layer.new.layer".into(), json!({}))]));
+        let (atn, _) = crate::atn_cmds::export("Set", &[&Action::new("Planted", vec![open()])], &[], false).unwrap();
+        let data = photocraft_paint::tile::b64_encode(&atn);
+
+        // An automation client loads a set and inserts a step into an existing action.
+        s.authorize = Some(deny_file);
+        s.execute("actions.load", json!({"data": data})).unwrap();
+        s.execute("actions.insert", json!({"action": "Edited", "id": "file.openAs", "params": {"path": "/outside/secret.png"}, "at": 0})).unwrap();
+        s.authorize = None;
+        assert!(!s.actions.list[0].automation, "the user's own action is not marked");
+
+        for name in ["Planted", "Edited"] {
+            let r = s.execute("actions.play", json!({"action": name})).unwrap();
+            assert_eq!(r["failed"]["id"], "file.openAs", "{name}: {r}");
+            assert!(r["failed"]["error"].as_str().unwrap().contains("disabled"), "{name}: {r}");
+            assert!(s.authorize.is_none(), "{name}: the kept gate is removed after playback");
+        }
+        // Nested: the user's action calling a planted one still meets the gate.
+        s.actions.list.push(Action::new("Caller", vec![("actions.play".into(), json!({"action": "Planted"}))]));
+        let r = s.execute("actions.play", json!({"action": "Caller"})).unwrap();
+        assert!(r["failed"]["error"].as_str().unwrap().contains("disabled"), "{r}");
+
+        // The user's own action runs with the user's access (the file is missing, not refused).
+        let r = s.execute("actions.play", json!({"action": "Mine"})).unwrap();
+        assert!(!r["failed"]["error"].as_str().unwrap().contains("disabled"), "{r}");
+        // A set the user loads is theirs.
+        s.execute("actions.load", json!({"data": data, "set": "Loaded by the user"})).unwrap();
+        assert!(!s.actions.list.last().unwrap().automation);
     }
 
     #[test]
