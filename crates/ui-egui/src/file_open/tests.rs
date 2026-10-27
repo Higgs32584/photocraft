@@ -249,7 +249,7 @@ fn a_flat_file_that_keeps_the_document_saves_in_place() {
 #[test]
 fn save_in_place_skips_files_it_would_write_back_with_less() {
     let (mut app, written) = app_with(vec![None, None, None]);
-    app.services.import = Some(Box::new(|name: &str, bytes: &[u8], _depth: usize| {
+    app.services.import = Some(Box::new(|name: &str, bytes: &[u8], _opts: &photocraft_io::ImportOptions| {
         photocraft_io::import(name, bytes).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
     }));
     let ctx = egui::Context::default();
