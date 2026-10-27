@@ -14,7 +14,9 @@ pub struct Limits {
     /// Maximum bytes for the decoded pixel buffer (and passed on as the
     /// allocation budget to underlying decoders).
     /// PNG also applies this to the aggregate decoded text/XMP UTF-8 bytes,
-    /// including keywords, separately from pixels. This is not a total RSS cap.
+    /// including keywords, separately from pixels. Animated WebP charges
+    /// every retained frame's full pixel copy plus its own copy of the
+    /// file's ICC profile against this budget. This is not a total RSS cap.
     pub max_alloc: u64,
 }
 
@@ -103,18 +105,18 @@ pub enum PngCompression {
 /// How a PNG's `sTER` chunk pairs its two views (PNG Extensions 1.4.0, §3.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PngStereo {
-    /// Left and right views side by side, left first.
-    Horizontal,
-    /// Left and right views stacked, left on top.
-    Vertical,
+    /// Side by side with the right-eye view first (cross-eyed viewing, mode 0).
+    CrossFuse,
+    /// Side by side with the left-eye view first (parallel viewing, mode 1).
+    DivergingFuse,
 }
 
 impl PngStereo {
     /// The view for an `sTER` mode byte; reserved and unknown values are `None`.
     pub fn from_mode(mode: u8) -> Option<Self> {
         match mode {
-            0 => Some(Self::Horizontal),
-            1 => Some(Self::Vertical),
+            0 => Some(Self::CrossFuse),
+            1 => Some(Self::DivergingFuse),
             _ => None,
         }
     }
@@ -122,8 +124,8 @@ impl PngStereo {
     /// The `sTER` mode byte.
     pub fn mode(self) -> u8 {
         match self {
-            Self::Horizontal => 0,
-            Self::Vertical => 1,
+            Self::CrossFuse => 0,
+            Self::DivergingFuse => 1,
         }
     }
 }

@@ -9,8 +9,8 @@ fn app() -> PhotocraftApp {
     let mut app = PhotocraftApp::new(
         Session::new(),
         Services {
-            import: Some(Box::new(|name, bytes, max_svg_group_depth| {
-                photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
+            import: Some(Box::new(|name, bytes, opts| {
+                photocraft_io::import_with_options(name, bytes, opts).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
             })),
             export: Some(Box::new(|doc, path, _| {
                 photocraft_io::export(doc, path, &Default::default()).map(|r| (r.bytes, r.warnings)).map_err(|e| e.to_string())
@@ -28,6 +28,16 @@ fn app() -> PhotocraftApp {
 fn identity(app: &PhotocraftApp) -> (String, Option<String>, u64, u64) {
     let st = app.session.active().unwrap();
     (st.doc.name.clone(), st.path.clone(), st.revision, st.saved_revision)
+}
+
+#[test]
+fn save_settings_share_only_the_open_documents_native_cache() {
+    let mut app = app();
+    let first = app.save_settings().io_options().pcraft_cache.unwrap();
+    assert_eq!(first, app.session.active().unwrap().pcraft_cache);
+    assert_eq!(first, app.save_settings().io_options().pcraft_cache.unwrap());
+    app.run("file.new", json!({"width": 2, "height": 2})).unwrap();
+    assert_ne!(first, app.save_settings().io_options().pcraft_cache.unwrap());
 }
 
 #[test]
